@@ -1,0 +1,46 @@
+steps:
+
+# 1️⃣ Automated tests
+- name: 'gcr.io/cloud-builders/docker'
+  entrypoint: 'bash'
+  args:
+    - '-c'
+    - |
+      echo "🚀 Running tests..."
+      chmod +x test.sh
+      ./test.sh
+
+# 2️⃣ SCP app files
+- name: 'gcr.io/cloud-builders/gcloud'
+  entrypoint: 'bash'
+  args:
+    - '-c'
+    - |
+      echo "⬇ Download SSH key"
+      gsutil cp gs://scenic-dynamo-465409-e1_cloudbuild/cloudbuild_vm_key /workspace/key
+      chmod 400 /workspace/key
+
+      echo "📌 Using static IP"
+      STATIC_IP=$(gcloud compute addresses describe web-static-ip --region=us-central1 --format='value(address)')
+      echo "STATIC_IP=$STATIC_IP"
+
+      for i in {1..5}; do
+        scp -i /workspace/key -o StrictHostKeyChecking=no -r ./app/* cloudbuild@$STATIC_IP:/var/www/html && break || {
+          echo "⚠ Attempt $i failed. Retrying..."
+          sleep 10
+        }
+      done
+
+# 3️⃣ Restart Nginx
+- name: 'gcr.io/cloud-builders/gcloud'
+  entrypoint: 'bash'
+  args:
+    - '-c'
+    - |
+      STATIC_IP=$(gcloud compute addresses describe web-static-ip --region=us-central1 --format='value(address)')
+      ssh -i /workspace/key -o StrictHostKeyChecking=no cloudbuild@$STATIC_IP \
+      "sudo systemctl restart nginx"
+
+timeout: 900s
+options:
+  logging: CLOUD_LOGGING_ONLY
